@@ -1,0 +1,66 @@
+name: Build Debug APK
+
+# 手机端入口：上传/推送到 main 或 master 后在 GitHub 上下载 artifact。
+# 也支持手动触发：Actions 页面 → 选这个 workflow → Run workflow。
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      # 本工程没有随包提交 gradlew 脚本与 gradle-wrapper.jar（二进制文件），
+      # 所以先用 runner 上的 gradle 生成 wrapper，再用 wrapper 构建。
+      # 版本以 gradle/wrapper/gradle-wrapper.properties 里钉的 8.14.3 为准。
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+
+      - name: Generate Gradle wrapper
+        run: gradle wrapper --gradle-version 8.14.3 --no-daemon
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      # 先出 APK：这是我们真正要的东西。
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      # 再跑单元测试。打乱算法的四条不变量在这里被钉死。
+      # 放在后面且不阻断：即使测试环境有问题，APK 也已经产出，不会白等一轮。
+      - name: Unit tests
+        continue-on-error: true
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: icon-shuffle-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload test report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
+          retention-days: 30
