@@ -1,0 +1,11 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 四个错位的方块，示意「打乱」 -->
+    <path android:fillColor="#FFFFFF" android:pathData="M34,34h14v14h-14z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M60,34h14v14h-14z" android:fillAlpha="0.75" />
+    <path android:fillColor="#FFFFFF" android:pathData="M34,60h14v14h-14z" android:fillAlpha="0.75" />
+    <path android:fillColor="#FFFFFF" android:pathData="M60,60h14v14h-14z" />
+</vector>

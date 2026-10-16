@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>图标打乱 · 技术调研纪要</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 15px/1.7 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+           max-width: 980px; margin: 0 auto; padding: 32px 20px 80px; }
+    h1 { font-size: 26px; margin-bottom: 4px; }
+    h2 { font-size: 19px; margin-top: 36px; padding-bottom: 6px; border-bottom: 1px solid #8883; }
+    h3 { font-size: 16px; margin-top: 24px; }
+    code { background: #8881; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+    table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14px; }
+    th, td { border: 1px solid #8884; padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #8881; }
+    .bad { color: #c0392b; font-weight: 600; }
+    .warn { color: #b26a00; font-weight: 600; }
+    .ok { color: #1b8a3a; font-weight: 600; }
+    blockquote { border-left: 3px solid #8884; margin: 16px 0; padding: 4px 16px; color: #666; }
+    .note { background: #8881; border-radius: 8px; padding: 12px 16px; margin: 16px 0; }
+  </style>
+</head>
+<body>
+
+<h1>图标打乱 · 技术调研纪要</h1>
+<p>目标设备：红米 K80 至尊版 · HyperOS · Android 16 (API 36) · 桌面 <code>com.miui.home</code></p>
+
+<h2>一、先说结论：需求里的技术路线需要修正</h2>
+
+<p>你的提示词里写：</p>
+<blockquote>实现这个功能唯一可靠的路径是：通过 Shizuku 获得系统级权限，直接读写桌面启动器（Launcher3）的 <code>launcher.db</code> 数据库。</blockquote>
+
+<p>这句话有两个问题，而且都不是我猜的，是<b>你指定的那个参考项目自己在 README 里写的</b>：</p>
+
+<table>
+  <tr><th>你的假设</th><th>参考项目的实际说法</th></tr>
+  <tr>
+    <td>Shizuku 直读写 launcher.db 是「唯一可靠路径」</td>
+    <td>该项目把它列为路径 ②，标注「<b>产品主方案</b>」，但在 TODO 里明确写着<br>
+        <code>- [ ] 验证 Shizuku 读写 launcher.db 的可行性（改字段 → 重启 launcher → 生效）</code><br>
+        <span class="bad">即：这条路他们也没验证成功过。</span></td>
+  </tr>
+  <tr>
+    <td>「读取」应该没问题，只是写入要权限</td>
+    <td>该项目 P5 阶段的实测结论：<br>
+        <code>- [x] 验证「读布局」的权限边界：<b>root 专属（普通 app ❌ / shell·Shizuku ❌）</b></code><br>
+        <span class="warn">即：以 shell 身份运行的 Shizuku，连读都读不到。</span></td>
+  </tr>
+  <tr>
+    <td>桌面是 Launcher3</td>
+    <td>你的机器是 <code>com.miui.home</code>（HyperOS 桌面），不是 AOSP Launcher3，<br>
+        <code>favorites</code> 表的列集合与 AOSP 有差异。</td>
+  </tr>
+  <tr>
+    <td>—</td>
+    <td>该项目真正跑通并落地的主路径是路径 ⑤：<b>Launcher3 官方「布局提供者」通道</b><br>
+        （<code>launcher3.layout.provider</code> + ContentProvider + 布局 XML 导入），免 root、瞬时。</td>
+  </tr>
+</table>
+
+<p>该项目自己给这条产品路线打的注脚是：</p>
+<blockquote>「<b>未在真机验证</b> —— 真机 Shizuku 走无线调试；<b>厂商 ROM 是否保留该通道未知，是最大产品风险</b>」</blockquote>
+
+<div class="note">
+<b>为什么 shell 读不到别人的 <code>/data/data</code>：</b>这是 Android 11+ 的 SELinux 设计，不是「权限没给够」。<br>
+<code>launcher.db</code> 的 SELinux 上下文是 <code>app_data_file</code>，而 shell 域只有 MLS 类别 <code>s0</code>，
+App 的数据文件带 <code>s0:c512,c768</code>。类别不匹配，即使 Unix 权限位是 0777 也照样 <code>EACCES</code>。
+Shizuku 以 root 启动时是另一回事（root 绕过 SELinux 检查），所以「能不能跑通」完全取决于
+<b>你的 Shizuku 是以 root 还是 wireless-debugging(shell) 启动的</b>。
+</div>
+
+<h2>二、四条可行路径对比</h2>
+
+<table>
+  <tr><th>#</th><th>路径</th><th>权限要求</th><th>在 HyperOS 16 上的预期</th><th>速度</th></tr>
+  <tr>
+    <td>②</td>
+    <td>Shizuku 直读写 <code>launcher.db</code> 的 <code>favorites</code> 表</td>
+    <td>Shizuku 以 <b>root</b> 启动<br>（shell 身份预期失败）</td>
+    <td>root 下高概率可行；shell 下基本会卡在复制那一步</td>
+    <td>瞬时</td>
+  </tr>
+  <tr>
+    <td>⑤</td>
+    <td>Launcher3 官方布局提供者通道<br><code>settings put secure launcher3.layout.provider &lt;provider&gt;</code></td>
+    <td>Shizuku 或 adb，免 root</td>
+    <td class="warn">未知。要求桌面是 Launcher3 系；<code>com.miui.home</code> 是否保留该通道需实测</td>
+    <td>瞬时</td>
+  </tr>
+  <tr>
+    <td>①</td>
+    <td>AccessibilityService 模拟长按 + 拖拽</td>
+    <td>只需无障碍权限</td>
+    <td class="ok">一定能跑，但慢、易碎，文件夹与跨页拖拽尤其容易失败</td>
+    <td>慢（每个图标 ~1s）</td>
+  </tr>
+  <tr>
+    <td>④</td>
+    <td>自建桌面</td>
+    <td>设为默认桌面</td>
+    <td class="ok">完全可控，但等于重写一个 Launcher，工作量最大</td>
+    <td>—</td>
+  </tr>
+</table>
+
+<h2>三、本工程已实现的部分（第一轮）</h2>
+
+<p>按你要求的顺序：项目结构 → 权限申请 → 读 favorites → 打乱并写回 → 最简界面。已全部落地：</p>
+
+<table>
+  <tr><th>模块</th><th>文件</th><th>说明</th></tr>
+  <tr><td>工程骨架</td><td><code>settings.gradle.kts</code>, <code>app/build.gradle.kts</code></td>
+      <td>Kotlin 2.2.0 + AGP 8.13.0，<code>compileSdk 36</code> / <code>minSdk 30</code>，XML + ViewBinding</td></tr>
+  <tr><td>权限申请</td><td><code>shizuku/ShizukuGateway.kt</code></td>
+      <td>三态状态机（未运行 / 未授权 / 就绪），<code>requestPermission</code> + 用户服务绑定与重连</td></tr>
+  <tr><td>特权侧</td><td><code>aidl/.../IPrivilegedService.aidl</code><br><code>shizuku/PrivilegedService.kt</code></td>
+      <td>跑在 Shizuku 身份下的用户服务：身份探测、文件搬运、<code>chmod</code>/<code>chown</code>、执行 shell</td></tr>
+  <tr><td>读 favorites</td><td><code>core/LauncherDb.kt</code></td>
+      <td><b>不硬编码列名</b>：先 <code>PRAGMA table_info(favorites)</code> 读真实 schema，再按存在的列组装。<br>只 UPDATE <code>cellX</code>/<code>cellY</code></td></tr>
+  <tr><td>打乱算法</td><td><code>core/ShuffleEngine.kt</code></td>
+      <td>两种范围：<b>所有页面</b>（逐页独立打乱）/<b>仅当前页面</b>；<br>
+          四条不变量按构造保证：页数不变、每页占格不变、页内换位、绝不跨页；<br>
+          保护 widget、文件夹内部、<code>hidden=1</code>、其它 profile、Dock</td></tr>
+  <tr><td>端到端</td><td><code>core/LauncherDbChannel.kt</code></td>
+      <td>备份 → 取回 → 改 → 校验 → <b>原子替换写回</b>（<code>cp</code> 到临时文件 → <code>chown</code> 回桌面 uid → <code>mv</code>）</td></tr>
+  <tr><td>界面</td><td><code>ui/MainActivity.kt</code> + <code>res/layout/activity_main.xml</code></td>
+      <td>一键打乱 / 范围切换 / 每日自动开关 + 时间选择 / 保护 Dock</td></tr>
+  <tr><td>自动打乱</td><td><code>auto/DailyShuffleScheduler.kt</code>, <code>DailyShuffleWorker.kt</code></td>
+      <td>WorkManager 周期任务，<code>setInitialDelay</code> 对齐到用户设定时刻；20 小时去重兜底</td></tr>
+  <tr><td>诊断</td><td><code>ui/DiagnoseActivity.kt</code></td>
+      <td><b>本轮最重要的产物</b>：把上面的不确定性一条条测出来，直接告诉你卡在哪一步</td></tr>
+  <tr><td>测试</td><td><code>test/.../ShuffleEngineTest.kt</code>, <code>LauncherDbTest.kt</code></td>
+      <td>不需要真机：Robolectric 起真实 SQLite，验证读写与「什么绝对不能动」</td></tr>
+</table>
+
+<h2>四、跑起来之后要做的第一件事</h2>
+
+<ol>
+  <li>装好 debug APK，打开「图标打乱」，点「授权 Shizuku」，弹窗选<b>始终允许</b>；</li>
+  <li>点「能力诊断」，把整份报告发我；</li>
+  <li>报告里「结论」一节会直接给出四选一：找不到库 / 读不到 / 只能读 / 全通。</li>
+</ol>
+
+<p>那几种失败结论分别对应不同的下一步：</p>
+
+<table>
+  <tr><th>诊断结论</th><th>下一步动作</th></tr>
+  <tr><td>❌ 没找到 launcher.db</td><td>发我「桌面」小节里的包名与候选路径，我改探测列表（可能库名叫别的）</td></tr>
+  <tr><td>❌ 读不到（最可能）</td><td>确认 Shizuku 是 root 还是无线调试启动。<b>root → 直接能跑</b>；<br>否则我给你加路径 ⑤ 的布局提供者实现，同时准备路径 ① 的无障碍兜底</td></tr>
+  <tr><td>⚠️ 只能读不能写</td><td>同上，写入需要 root 或换通道</td></tr>
+  <tr><td>✅ 全通</td><td>直接点「一键打乱」。第一次做完它会告诉你实际交换了多少个图标、备份在哪</td></tr>
+</table>
+
+<h2>五、风险与安全设计</h2>
+
+<ul>
+  <li><b>自动备份</b>：每次打乱前，先把 <code>launcher.db</code> 复制成
+      <code>databases/launcher.db.bak-yyyyMMdd-HHmmss</code>，并提供 <code>restore()</code> 回滚。</li>
+  <li><b>只改两列</b>：<code>UPDATE favorites SET cellX=?, cellY=? WHERE _id=?</code>，其余列与其它表一个字节不碰。</li>
+  <li><b>事务提交</b>：全部换位在一个 SQLite 事务里完成，中途失败不会留半个状态。</li>
+  <li><b>写后校验</b>：写完重新打开数据库回读，逐条比对目标坐标，不匹配会明确报告。</li>
+  <li><b>Dock 默认保护</b>：Dock 图标固定在 <code>container=-101</code>，默认不参与打乱。</li>
+  <li><b>不自动重启桌面</b>：默认关闭，避免 HyperOS 上出现黑屏。<code>pkill</code> 能力已实现但需显式开启。</li>
+</ul>
+
+<h2>六、打乱语义（已按你的确认修正）</h2>
+
+<p>你明确要求四条约束，因此<b>早期实现的「全体池子重排、允许跨页迁移」已被删除</b>。
+现在两个模式<b>都</b>满足这四条不变量：</p>
+
+<table>
+  <tr><th>#</th><th>不变量</th><th>实现层面如何保证</th></tr>
+  <tr><td>1</td><td>总页数不变</td>
+      <td>算法从不改动 <code>screen</code> 字段，一个字节都不写</td></tr>
+  <tr><td>2</td><td>每页占用的格数不变</td>
+      <td>目标坐标池 = <b>该页当前占用的坐标集合</b>，打乱只是重排「谁占哪个格」，
+          因此占格集合按构造恒等</td></tr>
+  <tr><td>3</td><td>图标只在页内换位</td>
+      <td>每个页面被切成独立的组，<code>ShuffleEngine.plan</code> 按 <code>screen</code> 分组后
+          逐组独立处理</td></tr>
+  <tr><td>4</td><td>绝不跨页迁移</td>
+      <td>每组的候选坐标只来自本组（<code>slots = group.map{...}</code>），
+          跨页在数据结构上不可能发生 —— 不是靠事后校验，是取不到别的页的坐标</td></tr>
+</table>
+
+<p>两个模式的区别只剩「一次处理几页」：</p>
+
+<table>
+  <tr><th>模式</th><th>行为</th></tr>
+  <tr><td><b>打乱所有页面</b></td><td>每一页各自独立打乱，一次全部处理完</td></tr>
+  <tr><td><b>仅当前页面</b></td><td>只处理你正在用的那一页，其余页一个图标都不动</td></tr>
+</table>
+
+<div class="note">
+<b>「当前页面」是怎么判断的？</b><br>
+Android 没有公开 API 能问出桌面停在哪一页。本工程用启发式：取 <code>favorites.modified</code>
+时间戳最晚的那一页 —— 也就是你刚才操作过的页面（见 <code>LauncherDb.guessCurrentScreen</code>）。
+<br>执行前日志会把「每页图标数」和「本次涉及的页面」都打出来，你可以直接核对是否打对了页。
+如果推测错了，说明该 ROM 不更新 <code>modified</code>，我再换成让你手动指定页号。
+<br><b>没有</b>为了这个默认值去申请无障碍权限 —— 不划算。
+</div>
+
+<p class="ok"><b>验证方式</b>：<code>ShuffleEngineTest</code> 用 3 页数据（含 1 个跨格 widget）
+乘以 30–50 个随机种子，逐条断言上述四条不变量，并额外覆盖 widget 不被移动、
+文件夹内部不动、<code>hidden=1</code> 不动、Dock 默认不动、单图标页不产生换位等保护规则。
+<code>LauncherDbTest</code> 则验证端到端「读 → 打乱 → 写 → 回读」后 id 集合与占格集合都不变。</p>
+
+<h2>七、待你确认 / 下一步</h2>
+
+<ol>
+  <li><b>诊断报告</b>（决定走路径 ② 还是路径 ⑤）；</li>
+  <li><b>你的 Shizuku 是 root 启动还是无线调试启动</b> —— 这一条基本决定路径 ② 的成败；</li>
+  <li>「仅当前页面」跑一次后，核对日志里的「涉及页面」是否真的是你当时在用的那一页。</li>
+</ol>
+
+</body>
+</html>

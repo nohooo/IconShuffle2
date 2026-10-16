@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">图标打乱</string>
+    <string name="title_diagnose">能力诊断</string>
+
+    <string name="btn_shuffle">一键打乱</string>
+    <string name="btn_diagnose">能力诊断</string>
+    <string name="btn_grant">授权 Shizuku</string>
+
+    <string name="label_scope">打乱范围</string>
+    <string name="scope_all_pages">打乱所有页面</string>
+    <string name="scope_all_pages_desc">每一页各自独立打乱，一次全部处理完。页数、每页占格数、每页图标归属都不变。</string>
+    <string name="scope_current_page">仅当前页面</string>
+    <string name="scope_current_page_desc">只打乱你正在用的那一页，其余页面一个图标都不动。页数与每页占格数同样不变。</string>
+
+    <string name="label_auto">每天自动打乱</string>
+    <string name="label_auto_time">执行时间</string>
+    <string name="label_dock">保持 Dock 栏不变</string>
+
+    <string name="status_shizuku_missing">Shizuku 未运行</string>
+    <string name="status_shizuku_no_perm">Shizuku 已运行，但本应用未获授权</string>
+    <string name="status_shizuku_ready">Shizuku 已就绪（%1$s）</string>
+</resources>

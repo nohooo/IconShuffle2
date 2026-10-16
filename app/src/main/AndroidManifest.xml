@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Shizuku 授权（Android 11+ 用无线调试启动时，Shizuku 自身需要的作用域说明） -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+      刻意不声明 QUERY_ALL_PACKAGES。
+      查询桌面包名用的是 queryIntentActivities(CATEGORY_HOME)，
+      这条路径在 Android 11+ 的包可见性规则里属于豁免项，无需额外权限。
+    -->
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.IconShuffle">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ui.DiagnoseActivity"
+            android:exported="false"
+            android:label="@string/title_diagnose" />
+
+        <!-- Shizuku 授权结果通过该 Provider 回传 -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+        <!--
+          运行在 Shizuku（shell / root）身份下的用户服务。
+          所有「需要特权身份」的文件读取、数据库写入都在这里面发生，
+          宿主 App 进程只负责传参和展示结果。
+        -->
+        <service
+            android:name=".shizuku.PrivilegedService"
+            android:exported="false"
+            android:permission="android.permission.BIND_SHIZUKU_USER_SERVICE">
+            <intent-filter>
+                <action android:name="moe.shizuku.api.BIND_SHIZUKU_USER_SERVICE" />
+            </intent-filter>
+        </service>
+
+        <!-- 应用被安装后需要重新上报，Shizuku 用户服务绑定时会用到 -->
+        <receiver
+            android:name=".auto.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+
+</manifest>
